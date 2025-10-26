@@ -1,0 +1,14 @@
+bash -c '
+cd /workspace
+if [ ! -f "/usr/bin/code-server" ]; then curl -fsSL https://code-server.dev/install.sh | sh; fi
+nohup code-server --bind-addr 0.0.0.0:8888 --auth none /workspace > code-server.log 2>&1 &
+echo $! > code-server.pid
+if [ ! -d "fluxgym" ]; then git clone --depth 1 https://github.com/jaysep/fluxgymHardened.git fluxgym; else cd fluxgym && git pull && cd ..; fi
+cd fluxgym
+pip install -q --no-cache-dir accelerate transformers diffusers[torch] bitsandbytes safetensors huggingface-hub toml einops opencv-python sentencepiece rich voluptuous gradio python-slugify pyyaml imagesize peft lycoris-lora==1.8.3 gradio_logsview@https://huggingface.co/spaces/cocktailpeanut/gradio_logsview/resolve/main/gradio_logsview-0.0.17-py3-none-any.whl
+sed -i "s|root_path=\"/proxy/7860\", ||" app.py
+nohup python app.py > fluxgym.log 2>&1 &
+echo $! > fluxgym.pid
+echo "FluxGym ready on port 7860, VS Code on port 8888"
+tail -f fluxgym.log
+'

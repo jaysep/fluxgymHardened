@@ -32,6 +32,7 @@ Production-ready FluxGym with comprehensive improvements:
 - State persistence (survives disconnects and refreshes)
 - Training log persistence (view progress after reconnection)
 - Success verification (prevents false positive completions)
+- VS Code Server (browser-based editor with terminal)
 - All fixes from https://github.com/jaysep/fluxgymHardened
 ```
 
@@ -81,96 +82,50 @@ Click **"Add Environment Variable"** for each:
 
 **HTTP Ports**:
 ```
-7860
+7860,8888
 ```
+
+**Port Details**:
+- `7860`: FluxGym UI (Gradio interface)
+- `8888`: VS Code Server (browser-based code editor)
 
 ---
 
 #### Start Script
 
-**COPY AND PASTE THIS ENTIRE SCRIPT**:
+**IMPORTANT:** Runpod's Docker Command field has a 4000 character limit. Use the compact version below.
+
+**📋 COPY FROM HERE 👇**
 
 ```bash
-#!/bin/bash
-set -e
-
-echo "================================================================"
-echo "   FluxGym Hardened - Automatic Setup"
-echo "   Repository: https://github.com/jaysep/fluxgymHardened"
-echo "================================================================"
-
-# Install FluxGym dependencies (cached after first run)
-echo "[1/4] Installing Python dependencies..."
-pip install -q --no-cache-dir \
-    gradio_logsview@https://huggingface.co/spaces/cocktailpeanut/gradio_logsview/resolve/main/gradio_logsview-0.0.17-py3-none-any.whl \
-    python-slugify \
-    transformers \
-    accelerate \
-    peft \
-    lycoris-lora==1.8.3 \
-    toml \
-    safetensors
-
-echo "[2/4] Setting up FluxGym..."
+bash -c '
 cd /workspace
-
-# Clone or update repository
-if [ ! -d "fluxgym" ]; then
-    echo "Cloning fluxgymHardened from GitHub..."
-    git clone --depth 1 https://github.com/jaysep/fluxgymHardened.git fluxgym
-    echo "✓ Repository cloned"
-else
-    echo "Updating existing installation..."
-    cd fluxgym
-    git pull
-    cd ..
-    echo "✓ Repository updated"
-fi
-
-echo "[3/4] Starting FluxGym..."
-cd /workspace/fluxgym
-
-# Start FluxGym in background
+if [ ! -f "/usr/bin/code-server" ]; then curl -fsSL https://code-server.dev/install.sh | sh; fi
+nohup code-server --bind-addr 0.0.0.0:8888 --auth none /workspace > code-server.log 2>&1 &
+echo $! > code-server.pid
+if [ ! -d "fluxgym" ]; then git clone --depth 1 https://github.com/jaysep/fluxgymHardened.git fluxgym; else cd fluxgym && git pull && cd ..; fi
+cd fluxgym
+pip install -q --no-cache-dir accelerate transformers diffusers[torch] bitsandbytes safetensors huggingface-hub toml einops opencv-python sentencepiece rich voluptuous gradio python-slugify pyyaml imagesize peft lycoris-lora==1.8.3 gradio_logsview@https://huggingface.co/spaces/cocktailpeanut/gradio_logsview/resolve/main/gradio_logsview-0.0.17-py3-none-any.whl
+cp app_runpod.py app.py
 nohup python app.py > fluxgym.log 2>&1 &
-FLUXGYM_PID=$!
-echo $FLUXGYM_PID > fluxgym.pid
-
-# Wait a moment for startup
-sleep 3
-
-# Check if process is running
-if ps -p $FLUXGYM_PID > /dev/null; then
-    echo "✓ FluxGym started successfully (PID: $FLUXGYM_PID)"
-else
-    echo "✗ FluxGym failed to start. Check logs:"
-    tail -n 20 fluxgym.log
-    exit 1
-fi
-
-echo "[4/4] Ready!"
-echo "================================================================"
-echo "   FluxGym Hardened is running!"
-echo "================================================================"
-echo ""
-echo "Access FluxGym UI:"
-echo "  → Click 'Connect' → 'HTTP Service [Port 7860]' in Runpod"
-echo ""
-echo "Logs:"
-echo "  → tail -f /workspace/fluxgym/fluxgym.log"
-echo ""
-echo "Features enabled:"
-echo "  ✓ Hang prevention (timeout fixes)"
-echo "  ✓ Automatic monitoring (GPU stuck detection)"
-echo "  ✓ State persistence (survives disconnects)"
-echo "  ✓ Training log persistence (view after refresh)"
-echo "  ✓ Success verification (no false positives)"
-echo ""
-echo "Documentation: /workspace/fluxgym/*.md"
-echo "================================================================"
-
-# Keep container running and show logs
-tail -f /workspace/fluxgym/fluxgym.log
+echo $! > fluxgym.pid
+echo "FluxGym ready on port 7860, VS Code on port 8888"
+tail -f fluxgym.log
+'
 ```
+
+**📋 COPY UNTIL HERE (including the closing single quote above) 👆**
+
+**Script size:** 919 characters (well under 4000 limit)
+
+**Note:** The script uses `app_runpod.py` which is pre-configured for Runpod's proxy system (uses `share=True` instead of `root_path`). See `APP_VERSIONS.md` for details.
+
+---
+
+**After pasting:**
+- Runpod will execute this script automatically when pod starts
+- First start: ~65 seconds (installs code-server, dependencies, clones repo)
+- Subsequent starts: ~22 seconds (everything cached)
 
 ---
 
@@ -238,14 +193,31 @@ Click **"Create"** or **"Save Template"**
 5. Set disk: **100GB** minimum
 6. Click **"Deploy On-Demand"** or **"Rent"**
 
-### Access FluxGym
+### Access Services
 
 **Wait ~1 minute for startup**, then:
+
+#### FluxGym UI (Training Interface)
 
 1. In Runpod pod view, click **"Connect"**
 2. Select **"HTTP Service [Port 7860]"**
 3. FluxGym UI opens in browser
 4. Start training!
+
+#### VS Code (Code Editor)
+
+1. In Runpod pod view, click **"Connect"**
+2. Select **"HTTP Service [Port 8888]"**
+3. VS Code opens in browser (no password needed)
+4. Edit files, run commands in terminal
+
+**VS Code Features**:
+- ✅ Full file browser for /workspace
+- ✅ Built-in terminal with shell access
+- ✅ Syntax highlighting for Python, YAML, JSON
+- ✅ Git integration
+- ✅ Edit app.py, config files, training scripts
+- ✅ View and edit all documentation
 
 ### Check Logs (Optional)
 
@@ -256,8 +228,12 @@ ssh root@<pod-ip> -p <port>
 # View FluxGym logs
 tail -f /workspace/fluxgym/fluxgym.log
 
-# Check if running
+# View VS Code logs
+tail -f /workspace/code-server.log
+
+# Check if processes running
 ps -p $(cat /workspace/fluxgym/fluxgym.pid)
+ps -p $(cat /workspace/code-server.pid)
 ```
 
 ---
@@ -269,26 +245,30 @@ ps -p $(cat /workspace/fluxgym/fluxgym.pid)
 ```
 0:00 - Container starts (PyTorch image)
 0:10 - Startup script begins
-0:15 - Installing dependencies...
-0:45 - Cloning GitHub repo (64MB)...
-0:50 - Starting FluxGym...
-0:55 - Ready! ✓
+0:12 - Installing code-server (~10s)...
+0:22 - Starting VS Code Server...
+0:25 - Installing Python dependencies...
+0:55 - Cloning GitHub repo (64MB)...
+1:00 - Starting FluxGym...
+1:05 - Ready! ✓
 ```
 
-**Total: ~55 seconds**
+**Total: ~65 seconds**
 
 ### Subsequent Starts (Warm)
 
 ```
 0:00 - Container starts
 0:10 - Startup script begins
-0:12 - Dependencies cached (skip)
-0:14 - Git pull updates...
-0:16 - Starting FluxGym...
-0:20 - Ready! ✓
+0:11 - code-server already installed (skip)
+0:12 - Starting VS Code Server...
+0:14 - Dependencies cached (skip)
+0:16 - Git pull updates...
+0:18 - Starting FluxGym...
+0:22 - Ready! ✓
 ```
 
-**Total: ~20 seconds**
+**Total: ~22 seconds**
 
 ---
 
@@ -366,6 +346,30 @@ After creating template, verify:
 ---
 
 ## Troubleshooting
+
+### "Script commands printed instead of executed"
+
+**Symptom**: In pod logs, you see all the echo commands printed literally instead of being executed
+
+**Cause**: Script not wrapped in `bash -c '...'`
+
+**Fix**:
+Make sure your script starts with `bash -c '` and ends with a closing `'`
+
+**Correct format:**
+```bash
+bash -c '
+echo "..."
+[all your commands]
+tail -f /workspace/fluxgym/fluxgym.log
+'
+```
+
+**NOT this:**
+```bash
+echo "..."
+[commands without bash -c wrapper]
+```
 
 ### "git: command not found"
 
@@ -480,6 +484,14 @@ Break-even: ~13 pod sessions/month
 - Quick start references
 - Troubleshooting help
 - Cloud deployment guides
+
+✅ **Development Tools**:
+- VS Code Server (port 8888)
+- Browser-based editor
+- Built-in terminal
+- Full file access to /workspace
+- Git integration
+- No password required
 
 ---
 

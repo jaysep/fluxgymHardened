@@ -165,7 +165,12 @@ All guides included in this repository:
 - [`QUICK_REFERENCE.md`](QUICK_REFERENCE.md) - Fast reference guide
 
 ## Runpod Deployment
+- [`RUNPOD_STARTUP_COMMAND.txt`](RUNPOD_STARTUP_COMMAND.txt) - **Ready-to-copy startup script** (919 chars)
 - [`RUNPOD_TEMPLATE_FOR_JAYSEP.md`](RUNPOD_TEMPLATE_FOR_JAYSEP.md) - **Complete template configuration** (USE THIS!)
+- [`APP_VERSIONS.md`](APP_VERSIONS.md) - **app.py vs app_runpod.py explained**
+- [`COMPACT_SCRIPT_EXPLAINED.md`](COMPACT_SCRIPT_EXPLAINED.md) - **Startup script explained line-by-line**
+- [`RUNPOD_DEPLOYMENT_TROUBLESHOOTING.md`](RUNPOD_DEPLOYMENT_TROUBLESHOOTING.md) - **Deployment issues & fixes**
+- [`GRADIO_RUNPOD_FIX.md`](GRADIO_RUNPOD_FIX.md) - **Gradio launch fix for Runpod**
 - [`RUNPOD_TEMPLATE_CREATION.md`](RUNPOD_TEMPLATE_CREATION.md) - Template creation guide
 - [`RUNPOD_MINIMAL_DEPLOYMENT.md`](RUNPOD_MINIMAL_DEPLOYMENT.md) - Skip 6GB containers (64MB deployment)
 - [`VS_CODE_INTEGRATION.md`](VS_CODE_INTEGRATION.md) - VS Code Server guide

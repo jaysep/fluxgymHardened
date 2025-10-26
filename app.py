@@ -5,7 +5,12 @@ os.environ['GRADIO_ANALYTICS_ENABLED'] = '0'
 sys.path.insert(0, os.getcwd())
 sys.path.append(os.path.join(os.path.dirname(__file__), 'sd-scripts'))
 import subprocess
+import logging
 import gradio as gr
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 from PIL import Image
 import torch
 import uuid
@@ -410,13 +415,15 @@ def gen_sh(
     # Disable sampling by default for 12GB VRAM to avoid hangs during sample generation
     # For 16GB and 20GB, sampling is enabled but monitored
     if len(sample_prompts) > 0 and sample_every_n_steps > 0:
-        sample = f"""--sample_prompts={sample_prompts_path} --sample_every_n_steps="{sample_every_n_steps}" {line_break}"""
+        sample = f"""--sample_prompts={sample_prompts_path} --sample_every_n_steps="{sample_every_n_steps}" {line_break}
+  """
 
     ############# Checkpoint args ########################
     checkpoint_args = ""
     if enable_checkpointing:
         # Save state at each epoch to enable resume
-        checkpoint_args = f"""--save_state {line_break}"""
+        checkpoint_args = f"""--save_state {line_break}
+  """
 
     ############# Resume args ########################
     resume_args = ""
@@ -444,7 +451,8 @@ def gen_sh(
   --max_grad_norm 0.0 {line_break}"""
     else:
         # 20G+ VRAM - Can use standard adamw8bit
-        optimizer = f"--optimizer_type adamw8bit {line_break}"
+        optimizer = f"""--optimizer_type adamw8bit {line_break}
+  """
 
 
     #######################################################
@@ -479,8 +487,7 @@ def gen_sh(
   --save_precision bf16 {line_break}
   --network_module networks.lora_flux {line_break}
   --network_dim {network_dim} {line_break}
-  {optimizer}{checkpoint_args}{sample}
-  --learning_rate {learning_rate} {line_break}
+  {optimizer}{checkpoint_args}{sample}--learning_rate {learning_rate} {line_break}
   --cache_text_encoder_outputs {line_break}
   --cache_text_encoder_outputs_to_disk {line_break}
   --fp8_base {line_break}
@@ -494,7 +501,7 @@ def gen_sh(
   --discrete_flow_shift 3.1582 {line_break}
   --model_prediction_type raw {line_break}
   --guidance_scale {guidance_scale} {line_break}
-  --loss_type l2 {line_break}"""
+  --loss_type l2"""
    
 
 
@@ -1005,10 +1012,7 @@ def start_training(
     # Setup training log file for persistence
     training_log_file = resolve_path_without_quotes(f"outputs/{output_name}/training.log")
 
-    # Use Popen to run the command and capture output in real-time
-    env = os.environ.copy()
-    env['PYTHONIOENCODING'] = 'utf-8'
-    env['LOG_LEVEL'] = 'DEBUG'
+    # Use LogsViewRunner to execute and stream logs
     runner = LogsViewRunner()
     cwd = os.path.dirname(os.path.abspath(__file__))
     gr.Info(f"Started training (Log: outputs/{output_name}/training.log)")
@@ -1019,10 +1023,12 @@ def start_training(
 
     try:
         with open(training_log_file, 'w', encoding='utf-8') as log_file:
-            for line in runner.run_command([command], cwd=cwd):
-                log_file.write(line + '\n')
-                log_file.flush()  # Ensure immediate write
-                yield line
+            for log_batch in runner.run_command([command], cwd=cwd):
+                # log_batch is a list of Log objects
+                for log in log_batch:
+                    log_file.write(log.message + '\n')
+                    log_file.flush()  # Ensure immediate write
+                yield log_batch
 
         yield runner.log(f"Runner: {runner}")
 
@@ -1686,4 +1692,4 @@ with gr.Blocks(elem_id="app", theme=theme, css=css, fill_width=True) as demo:
     refresh.click(update, inputs=listeners, outputs=[train_script, train_config, dataset_folder])
 if __name__ == "__main__":
     cwd = os.path.dirname(os.path.abspath(__file__))
-    demo.launch(server_name="0.0.0.0", server_port=7860, root_path="/proxy/7860", debug=True, show_error=True, allowed_paths=[cwd], show_api=False)
+    demo.launch(server_name="0.0.0.0", server_port=7860, root_path="/proxy/7860", debug=True, show_error=True, allowed_paths=[cwd], show_api=False, share=True)

@@ -6,10 +6,20 @@ This script monitors GPU usage during training and automatically detects
 when training gets stuck (GPU usage drops to 0%). It can:
 1. Alert the user when training is stuck
 2. Kill stuck Python processes
-3. Automatically resume training from the last checkpoint
+3. Automatically resume training from the last checkpoint (if exists)
+4. Automatically restart training from beginning (if no checkpoint)
 
 Usage:
-    python training_monitor.py --output-dir outputs/my-lora --check-interval 30 --stuck-threshold 300 --auto-resume
+    python training_monitor.py --output-dir outputs/my-lora --check-interval 30 --stuck-threshold 300 --auto-resume --train-script outputs/my-lora/train.sh
+
+Example:
+    # Start monitoring with auto-resume enabled
+    python training_monitor.py \
+        --output-dir /workspace/fluxgym/outputs/my-lora \
+        --train-script /workspace/fluxgym/outputs/my-lora/train.sh \
+        --auto-resume \
+        --stuck-threshold 300 \
+        --check-interval 30
 """
 
 import os
@@ -152,10 +162,101 @@ class CheckpointManager:
     """Manage training checkpoints"""
 
     def __init__(self, output_dir: str):
-        self.output_dir = Path(output_dir)
+        self.output_dir = Path(output_dir).resolve()  # Convert to absolute path
+
+    def validate_checkpoint(self, checkpoint_path: Path) -> bool:
+        """
+        Validate that checkpoint directory contains all required files for resume.
+
+        Returns True if checkpoint is complete and valid, False otherwise.
+        """
+        # Required files for accelerate checkpoint (base files)
+        base_required_files = [
+            'optimizer.bin',             # Optimizer state
+            'random_states_0.pkl',       # RNG states
+            'scheduler.bin'              # LR scheduler state
+        ]
+
+        # Check base required files exist and are not empty
+        for required_file in base_required_files:
+            file_path = checkpoint_path / required_file
+
+            if not file_path.exists():
+                logger.warning(f"Checkpoint {checkpoint_path.name} missing required file: {required_file}")
+                return False
+
+            # Check if file is not empty (corrupted write)
+            if file_path.stat().st_size == 0:
+                logger.warning(f"Checkpoint {checkpoint_path.name} has empty file: {required_file}")
+                return False
+
+        # Check for metadata - can be either custom_checkpoint_0.pkl OR train_state.json
+        has_custom_checkpoint = (checkpoint_path / 'custom_checkpoint_0.pkl').exists()
+        has_train_state = (checkpoint_path / 'train_state.json').exists()
+
+        if not has_custom_checkpoint and not has_train_state:
+            logger.warning(f"Checkpoint {checkpoint_path.name} missing both custom_checkpoint_0.pkl and train_state.json")
+            return False
+
+        # Validate custom_checkpoint_0.pkl if it exists (newer format)
+        if has_custom_checkpoint:
+            try:
+                import pickle
+                metadata_path = checkpoint_path / 'custom_checkpoint_0.pkl'
+
+                with open(metadata_path, 'rb') as f:
+                    data = pickle.load(f)
+
+                if 'step' not in data:
+                    logger.warning(f"Checkpoint {checkpoint_path.name} metadata missing 'step' key")
+                    return False
+
+                # Log checkpoint info
+                step = data.get('step', '?')
+                epoch = data.get('epoch', '?')
+                logger.info(f"Validated checkpoint {checkpoint_path.name} (new format): step={step}, epoch={epoch}")
+                return True
+
+            except Exception as e:
+                logger.warning(f"Failed to validate checkpoint {checkpoint_path.name} metadata: {e}")
+                # Fall through to check train_state.json if available
+                if not has_train_state:
+                    return False
+
+        # Validate train_state.json if custom_checkpoint doesn't exist or failed
+        if has_train_state:
+            try:
+                import json
+                train_state_path = checkpoint_path / 'train_state.json'
+
+                with open(train_state_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                # This format has current_step and current_epoch
+                if 'current_step' not in data:
+                    logger.warning(f"Checkpoint {checkpoint_path.name} train_state.json missing 'current_step' key")
+                    return False
+
+                step = data.get('current_step', '?')
+                epoch = data.get('current_epoch', '?')
+
+                # IMPORTANT: This older format may NOT work with newer accelerate versions
+                logger.warning(f"Checkpoint {checkpoint_path.name} uses old format (train_state.json)")
+                logger.warning(f"This may fail with: KeyError: 'step' when resuming")
+                logger.warning(f"Step={step}, Epoch={epoch}")
+                logger.warning(f"Consider this checkpoint INVALID for auto-resume")
+
+                # Return False because this will likely fail with KeyError: 'step'
+                return False
+
+            except Exception as e:
+                logger.warning(f"Failed to validate checkpoint {checkpoint_path.name} train_state: {e}")
+                return False
+
+        return False
 
     def find_latest_checkpoint(self) -> Optional[Path]:
-        """Find the latest checkpoint (state) directory"""
+        """Find the latest VALID checkpoint (state) directory"""
         if not self.output_dir.exists():
             logger.warning(f"Output directory does not exist: {self.output_dir}")
             return None
@@ -166,17 +267,21 @@ class CheckpointManager:
         # Pattern: <name>-state or <name>-<epoch>-state or <name>-step-<step>-state
         for item in self.output_dir.iterdir():
             if item.is_dir() and 'state' in item.name.lower():
-                state_dirs.append(item)
+                # Only include checkpoints that pass validation
+                if self.validate_checkpoint(item):
+                    state_dirs.append(item)
+                else:
+                    logger.warning(f"Skipping invalid/incomplete checkpoint: {item.name}")
 
         if not state_dirs:
-            logger.warning(f"No checkpoint states found in {self.output_dir}")
+            logger.warning(f"No valid checkpoint states found in {self.output_dir}")
             return None
 
         # Sort by modification time, most recent first
         state_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
         latest = state_dirs[0]
 
-        logger.info(f"Found latest checkpoint: {latest}")
+        logger.info(f"Selected latest valid checkpoint: {latest}")
         return latest
 
     def find_latest_model_checkpoint(self) -> Optional[Path]:
@@ -288,10 +393,11 @@ class TrainingMonitor:
 
         if self.auto_resume:
             if latest_checkpoint:
-                logger.info("Auto-resume is enabled. Attempting to resume training...")
+                logger.info("Auto-resume is enabled. Attempting to resume training from checkpoint...")
                 self.resume_training(latest_checkpoint)
             else:
-                logger.error("Cannot auto-resume: No checkpoint found!")
+                logger.warning("No checkpoint found. Restarting training from beginning...")
+                self.restart_training_from_beginning()
         else:
             logger.info("Auto-resume is disabled. Please manually restart training.")
             logger.info("To resume from checkpoint, add this flag to your training command:")
@@ -305,26 +411,108 @@ class TrainingMonitor:
             logger.info(f"Please manually run with: --resume {checkpoint_path}")
             return
 
-        train_script_path = Path(self.train_script)
+        train_script_path = Path(self.train_script).resolve()  # Convert to absolute path
         if not train_script_path.exists():
             logger.error(f"Training script not found: {train_script_path}")
             return
 
-        # Build resume command
+        # Read the training script
+        try:
+            with open(train_script_path, 'r') as f:
+                script_content = f.read()
+        except Exception as e:
+            logger.error(f"Failed to read training script: {e}")
+            return
+
+        # Modify script to add --resume flag
         if train_script_path.suffix == '.sh':
-            # Bash script - we need to modify it to add --resume flag
-            logger.warning("Auto-resume with .sh scripts requires manual intervention")
-            logger.info(f"Please edit {train_script_path} and add:")
-            logger.info(f"  --resume {checkpoint_path}")
+            # Find the accelerate launch command and add --resume before the last line
+            # The last line is typically "--loss_type l2" or similar
+            lines = script_content.split('\n')
+
+            # Find where to insert --resume (before the last parameter line)
+            modified_lines = []
+            inserted = False
+
+            for i, line in enumerate(lines):
+                # Look for the last parameter line (doesn't end with backslash)
+                if '--loss_type' in line and not line.rstrip().endswith('\\'):
+                    # Insert --resume before this line
+                    modified_lines.append(f"  --resume {checkpoint_path} \\")
+                    modified_lines.append(line)
+                    inserted = True
+                else:
+                    modified_lines.append(line)
+
+            if not inserted:
+                logger.error("Could not find insertion point for --resume flag")
+                logger.info(f"Please manually add: --resume {checkpoint_path}")
+                return
+
+            modified_script = '\n'.join(modified_lines)
+
+            # Save modified script
+            try:
+                with open(train_script_path, 'w') as f:
+                    f.write(modified_script)
+                logger.info(f"Modified training script with --resume {checkpoint_path}")
+            except Exception as e:
+                logger.error(f"Failed to write modified script: {e}")
+                return
+
+            # Execute the script in background
+            logger.info(f"Starting training from checkpoint: {checkpoint_path}")
+            self._execute_training_script(train_script_path)
+
         elif train_script_path.suffix == '.bat':
-            logger.warning("Auto-resume with .bat scripts requires manual intervention")
+            logger.warning("Auto-resume with .bat scripts is not yet supported")
             logger.info(f"Please edit {train_script_path} and add:")
             logger.info(f"  --resume {checkpoint_path}")
         else:
             logger.error("Unknown training script format")
 
-        logger.info("For now, auto-resume requires manual script editing")
-        logger.info("Future versions will support automatic resume")
+    def restart_training_from_beginning(self):
+        """Restart training from the beginning (no checkpoint resume)"""
+        if not self.train_script:
+            logger.error("Cannot restart: No training script provided")
+            return
+
+        train_script_path = Path(self.train_script).resolve()  # Convert to absolute path
+        if not train_script_path.exists():
+            logger.error(f"Training script not found: {train_script_path}")
+            return
+
+        # Execute the original script without modifications
+        logger.info("Starting training from the beginning...")
+        self._execute_training_script(train_script_path)
+
+    def _execute_training_script(self, script_path: Path):
+        """Execute training script in background"""
+        try:
+            # Get the directory of the script for proper working directory
+            script_dir = script_path.parent
+
+            # Start the training process in background
+            # Redirect output to a log file
+            log_file = script_dir / 'training_resume.log'
+
+            logger.info(f"Executing: bash {script_path}")
+            logger.info(f"Output will be logged to: {log_file}")
+
+            with open(log_file, 'w') as f:
+                process = subprocess.Popen(
+                    ['bash', str(script_path)],
+                    cwd=str(script_dir),
+                    stdout=f,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True  # Detach from parent process
+                )
+
+            logger.info(f"Training restarted with PID: {process.pid}")
+            logger.info("Monitor will continue tracking the resumed training...")
+
+        except Exception as e:
+            logger.error(f"Failed to execute training script: {e}", exc_info=True)
 
     def monitor(self):
         """Main monitoring loop"""
@@ -383,12 +571,12 @@ def main():
     parser.add_argument(
         '--auto-resume',
         action='store_true',
-        help='Automatically attempt to resume training (experimental)'
+        help='Automatically resume training from checkpoint when stuck (or restart from beginning if no checkpoint)'
     )
     parser.add_argument(
         '--train-script',
         type=str,
-        help='Path to training script for auto-resume (e.g., outputs/my-lora/train.sh)'
+        help='Path to training script for auto-resume (required with --auto-resume, e.g., outputs/my-lora/train.sh)'
     )
 
     args = parser.parse_args()

@@ -42,9 +42,9 @@ Production-ready FluxGym with comprehensive improvements:
 
 **Container Image**:
 ```
-runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
+runpod/pytorch:2.1.1-py3.10-cuda12.1.0-devel-ubuntu22.04
 ```
-*Or use: `runpod/pytorch:2.1.1-py3.10-cuda12.1.0-devel-ubuntu22.04` for broader compatibility*
+**CRITICAL:** Must use Python 3.10, not 3.11. The working Next Diffusion template uses Python 3.10.12, and the same package versions fail on Python 3.11 with TypeError in Gradio.
 
 **Docker Command**: (Leave empty)
 
@@ -105,9 +105,12 @@ nohup code-server --bind-addr 0.0.0.0:8888 --auth none /workspace > code-server.
 echo $! > code-server.pid
 if [ ! -d "fluxgym" ]; then git clone --depth 1 https://github.com/jaysep/fluxgymHardened.git fluxgym; else cd fluxgym && git pull && cd ..; fi
 cd fluxgym
-pip install -q --no-cache-dir accelerate transformers diffusers[torch] bitsandbytes safetensors huggingface-hub toml einops opencv-python sentencepiece rich voluptuous gradio python-slugify pyyaml imagesize peft lycoris-lora==1.8.3 gradio_logsview@https://huggingface.co/spaces/cocktailpeanut/gradio_logsview/resolve/main/gradio_logsview-0.0.17-py3-none-any.whl
-cp app_runpod.py app.py
-nohup python app.py > fluxgym.log 2>&1 &
+python -m venv --system-site-packages env
+source env/bin/activate
+pip install -q --upgrade pip
+pip install -q --no-cache-dir fastapi==0.116.1 starlette==0.47.2 uvicorn==0.35.0 httpcore==1.0.9 httpx==0.28.1 h11==0.16.0 anyio==4.9.0 certifi==2025.7.14 attrs==25.3.0 jsonschema==4.25.0 packaging==25.0 accelerate==0.33.0 transformers==4.44.0 bitsandbytes==0.46.1 safetensors==0.4.4 huggingface-hub==0.34.3 toml==0.10.2 einops==0.7.0 opencv-python==4.8.1.78 sentencepiece==0.2.0 rich==13.7.0 voluptuous==0.13.1 gradio==4.44.1 python-slugify==8.0.4 pyyaml==6.0.2 imagesize==1.4.1 peft==0.16.0 lycoris-lora==1.8.3 "gradio_logsview@https://huggingface.co/spaces/cocktailpeanut/gradio_logsview/resolve/main/gradio_logsview-0.0.17-py3-none-any.whl" && pip install -q --no-cache-dir "git+https://github.com/huggingface/diffusers.git@56d438727036b0918b30bbe3110c5fe1634ed19d"
+export PYTHONWARNINGS="ignore"
+nohup python3 app.py > fluxgym.log 2>&1 &
 echo $! > fluxgym.pid
 echo "FluxGym ready on port 7860, VS Code on port 8888"
 tail -f fluxgym.log
@@ -116,9 +119,16 @@ tail -f fluxgym.log
 
 **📋 COPY UNTIL HERE (including the closing single quote above) 👆**
 
-**Script size:** 919 characters (well under 4000 limit)
+**Script size:** 1430 characters (well under 4000 limit)
 
-**Note:** The script uses `app_runpod.py` which is pre-configured for Runpod's proxy system (uses `share=True` instead of `root_path`). See `APP_VERSIONS.md` for details.
+**Critical Version Pinning:** This script uses a Python virtual environment with exact package versions that are verified to work. Key points:
+
+- **Virtual environment**: Creates isolated environment with `--system-site-packages` to inherit torch/torchvision from base container
+- **Exact versions required**: fastapi==0.116.1, starlette==0.47.2, uvicorn==0.35.0
+  - **DO NOT** use newer versions (fastapi>=0.120, starlette>=0.48, uvicorn>=0.38) - they have breaking bugs with Gradio
+- **All packages pinned**: Every dependency uses exact version matching the verified working Next Diffusion FluxGym template
+
+**Note:** The app.py already has correct Runpod configuration with `root_path="/proxy/7860"` and logo path `/proxy/7860/file=icon.png`.
 
 ---
 

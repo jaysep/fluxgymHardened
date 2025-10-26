@@ -165,9 +165,9 @@ All guides included in this repository:
 - [`QUICK_REFERENCE.md`](QUICK_REFERENCE.md) - Fast reference guide
 
 ## Runpod Deployment
-- [`RUNPOD_STARTUP_COMMAND.txt`](RUNPOD_STARTUP_COMMAND.txt) - **Ready-to-copy startup script** (919 chars)
+- [`RUNPOD_STARTUP_COMMAND.txt`](RUNPOD_STARTUP_COMMAND.txt) - **Ready-to-copy startup script** (895 chars)
 - [`RUNPOD_TEMPLATE_FOR_JAYSEP.md`](RUNPOD_TEMPLATE_FOR_JAYSEP.md) - **Complete template configuration** (USE THIS!)
-- [`APP_VERSIONS.md`](APP_VERSIONS.md) - **app.py vs app_runpod.py explained**
+- [`APP_VERSIONS.md`](APP_VERSIONS.md) - **Runpod configuration explained** (app.py is already configured!)
 - [`COMPACT_SCRIPT_EXPLAINED.md`](COMPACT_SCRIPT_EXPLAINED.md) - **Startup script explained line-by-line**
 - [`RUNPOD_DEPLOYMENT_TROUBLESHOOTING.md`](RUNPOD_DEPLOYMENT_TROUBLESHOOTING.md) - **Deployment issues & fixes**
 - [`GRADIO_RUNPOD_FIX.md`](GRADIO_RUNPOD_FIX.md) - **Gradio launch fix for Runpod**

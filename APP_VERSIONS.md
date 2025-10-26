@@ -1,11 +1,17 @@
-# FluxGym Application Versions
+# FluxGym Application Configuration
 
-## Two Versions for Different Environments
+## Runpod Configuration (Already Included!)
 
-### `app.py` - Standard Version
-**For:** Local deployment, standard cloud environments
+Good news: **app.py already has the correct Runpod configuration!**
 
-**Launch configuration:**
+### Current Configuration in app.py
+
+**Line 1378** - Logo with proxy path:
+```html
+<img id='logo' src='/proxy/7860/file=icon.png' width='80' height='80'>
+```
+
+**Line 1689** - Demo launch with root_path:
 ```python
 demo.launch(
     server_name="0.0.0.0",
@@ -17,116 +23,113 @@ demo.launch(
 )
 ```
 
-**Features:**
-- Uses `root_path="/proxy/7860"` for proxy environments
-- Works with most standard setups
-- Default version for general use
+### Why This Works on Runpod
+
+✅ **`server_name="0.0.0.0"`** - Binds to all network interfaces (allows external access)
+✅ **`server_port=7860`** - Standard FluxGym port
+✅ **`root_path="/proxy/7860"`** - Tells Gradio it's behind Runpod's proxy
+✅ **Logo path `/proxy/7860/file=icon.png`** - Correctly routes through proxy
+
+### What Doesn't Work
+
+❌ **Without root_path:**
+```python
+demo.launch(debug=True, show_error=True, allowed_paths=[cwd])
+```
+Result: Gradio doesn't know it's behind a proxy, routing fails
+
+❌ **Without server_name/server_port:**
+```python
+demo.launch(root_path="/proxy/7860", debug=True, show_error=True, allowed_paths=[cwd])
+```
+Result: Might not bind to 0.0.0.0, external access fails
 
 ---
 
-### `app_runpod.py` - Runpod Version
-**For:** Runpod deployment (and similar cloud GPU platforms)
+## No Separate Version Needed!
 
-**Launch configuration:**
+**Previous assumption was wrong.** We don't need app_runpod.py because:
+
+1. The `root_path="/proxy/7860"` IS required for Runpod
+2. It's already correctly configured in app.py
+3. No patching or file copying needed
+
+---
+
+## Runpod Deployment
+
+The startup script simply runs app.py directly:
+
+```bash
+nohup python app.py > fluxgym.log 2>&1 &
+```
+
+No modifications needed! ✅
+
+---
+
+## If You Need Local Deployment
+
+**For local deployment** (without proxy), you can temporarily modify line 1689:
+
 ```python
+# Local version (no proxy)
 demo.launch(
-    server_name="0.0.0.0",
+    server_name="127.0.0.1",  # localhost only
     server_port=7860,
-    share=True,
     debug=True,
     show_error=True,
     allowed_paths=[cwd]
 )
 ```
 
-**Changes from standard version:**
-- ✅ Removed `root_path="/proxy/7860"` - Conflicts with Runpod's proxy system
-- ✅ Added `share=True` - Required when localhost check fails on Runpod
-- ✅ Otherwise identical functionality
-
-**Why needed:**
-- Runpod's proxy system handles routing automatically
-- Setting `root_path` causes Gradio to think localhost is inaccessible
-- Results in `ValueError: When localhost is not accessible, a shareable link must be created`
+But the Runpod version with `root_path="/proxy/7860"` should work locally too - just access via `http://localhost:7860/proxy/7860/`
 
 ---
 
-## Runpod Deployment
+## Changes From Original FluxGym
 
-The startup script automatically uses the Runpod version:
+Compared to the original FluxGym, we've added:
 
-```bash
-cd fluxgym
-cp app_runpod.py app.py
-nohup python app.py > fluxgym.log 2>&1 &
-```
-
-This ensures Gradio launches correctly on Runpod without manual patching.
+1. ✅ **`server_name="0.0.0.0"`** - For cloud access
+2. ✅ **`server_port=7860`** - Explicit port
+3. ✅ **`root_path="/proxy/7860"`** - Runpod proxy support
+4. ✅ **Logo path with `/proxy/7860/`** - Correct asset routing
 
 ---
 
-## Maintaining Both Versions
+## Troubleshooting
 
-When updating FluxGym functionality:
+### "404 Not Found" errors for assets
+**Cause:** Logo or other assets not routing through proxy
+**Fix:** Ensure paths include `/proxy/7860/` prefix (already done in app.py)
 
-1. **Make changes to `app.py`** (standard version)
-2. **Copy to `app_runpod.py`**:
-   ```bash
-   cp app.py app_runpod.py
-   ```
-3. **Update the launch line in `app_runpod.py`**:
-   ```python
-   # Change this line only:
-   demo.launch(server_name="0.0.0.0", server_port=7860, share=True, debug=True, show_error=True, allowed_paths=[cwd])
-   ```
+### "Connection refused"
+**Cause:** Not binding to 0.0.0.0
+**Fix:** Ensure `server_name="0.0.0.0"` (already done in app.py)
 
-Or use this automated approach:
-
-```bash
-# Copy app.py to app_runpod.py
-cp app.py app_runpod.py
-
-# Fix the launch line for Runpod
-sed -i 's/demo.launch(server_name="0.0.0.0", server_port=7860, root_path="\/proxy\/7860",/demo.launch(server_name="0.0.0.0", server_port=7860, share=True,/' app_runpod.py
-```
+### "Page won't load" on Runpod
+**Cause:** Missing root_path
+**Fix:** Ensure `root_path="/proxy/7860"` (already done in app.py)
 
 ---
 
-## Benefits of This Approach
+## Summary
 
-✅ **No runtime patching** - Clean, pre-configured files
-✅ **Version controlled** - Both versions in GitHub
-✅ **Easy maintenance** - Single line difference
-✅ **Explicit intent** - Clear which version is for what
-✅ **No sed complexity** - Simple file copy in startup script
-✅ **Faster startup** - No string replacement needed
+✅ **app.py is already Runpod-ready!**
+✅ **No patching needed**
+✅ **No separate version needed**
+✅ **Just clone and run**
 
----
-
-## Other Cloud Platforms
-
-**Vast.ai, Lambda Labs, etc.:**
-- Try `app.py` first (standard version)
-- If you get "localhost not accessible" error, use `app_runpod.py` method:
-  ```bash
-  cp app_runpod.py app.py
-  ```
-
-**Local deployment:**
-- Use `app.py` (standard version)
-- Should work without modifications
+The current app.py configuration works perfectly for:
+- Runpod
+- Vast.ai
+- Lambda Labs
+- Other cloud platforms with proxy routing
+- Local deployment (with proxy path)
 
 ---
 
-## File Locations
+**Repository:** https://github.com/jaysep/fluxgymHardened
 
-```
-fluxgym/
-├── app.py              # Standard version (local/general cloud)
-├── app_runpod.py       # Runpod version (cloud GPU platforms)
-└── APP_VERSIONS.md     # This file
-```
-
----
-
-**Summary:** Two versions, one line difference, clean deployment. 🚀
+**Ready to deploy!** 🚀

@@ -8,6 +8,7 @@
 ✅ **State Persistence** - UI restores after refresh
 ✅ **Active Sessions Display** - See all training runs
 ✅ **Training Log Persistence** - View logs after page refresh
+✅ **VS Code Server** - Browser-based editor for cloud pods (Runpod)
 
 ---
 

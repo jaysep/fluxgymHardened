@@ -4684,7 +4684,12 @@ def resume_from_local_or_hf_if_specified(accelerator, args):
 
     if not args.resume_from_huggingface:
         logger.info(f"resume training from local state: {args.resume}")
-        accelerator.load_state(args.resume)
+
+        # FIX: Pass weights_only=False to allow loading numpy arrays in random_states_0.pkl
+        # Accelerate 0.33.0 uses weights_only=True by default, which blocks numpy arrays
+        load_kwargs = {"weights_only": False}
+        accelerator.load_state(args.resume, load_kwargs=load_kwargs)
+
         return
 
     logger.info(f"resume training from huggingface state: {args.resume}")
@@ -5843,12 +5848,17 @@ def save_sd_model_on_epoch_end_or_stepwise_common(
             save_and_remove_state_stepwise(args, accelerator, global_step)
 
 
-def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, epoch_no):
+def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, epoch_no, global_step=None):
     model_name = default_if_none(args.output_name, DEFAULT_EPOCH_NAME)
 
     logger.info("")
     logger.info(f"saving state at epoch {epoch_no}")
     os.makedirs(args.output_dir, exist_ok=True)
+
+    # FIX: Set accelerator.step before saving so it's included in the checkpoint
+    # This is needed for accelerator.load_state() to work correctly
+    if global_step is not None:
+        accelerator.step = global_step
 
     state_dir = os.path.join(args.output_dir, EPOCH_STATE_NAME.format(model_name, epoch_no))
     accelerator.save_state(state_dir)
@@ -5872,6 +5882,10 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
     logger.info(f"saving state at step {step_no}")
     os.makedirs(args.output_dir, exist_ok=True)
 
+    # FIX: Set accelerator.step before saving so it's included in the checkpoint
+    # This is needed for accelerator.load_state() to work correctly
+    accelerator.step = step_no
+
     state_dir = os.path.join(args.output_dir, STEP_STATE_NAME.format(model_name, step_no))
     accelerator.save_state(state_dir)
     if args.save_state_to_huggingface:
@@ -5891,12 +5905,17 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
                 shutil.rmtree(state_dir_old)
 
 
-def save_state_on_train_end(args: argparse.Namespace, accelerator):
+def save_state_on_train_end(args: argparse.Namespace, accelerator, global_step=None):
     model_name = default_if_none(args.output_name, DEFAULT_LAST_OUTPUT_NAME)
 
     logger.info("")
     logger.info("saving last state.")
     os.makedirs(args.output_dir, exist_ok=True)
+
+    # FIX: Set accelerator.step before saving so it's included in the checkpoint
+    # This is needed for accelerator.load_state() to work correctly
+    if global_step is not None:
+        accelerator.step = global_step
 
     state_dir = os.path.join(args.output_dir, LAST_STATE_NAME.format(model_name))
     accelerator.save_state(state_dir)

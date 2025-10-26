@@ -4685,28 +4685,43 @@ def resume_from_local_or_hf_if_specified(accelerator, args):
     if not args.resume_from_huggingface:
         logger.info(f"resume training from local state: {args.resume}")
 
-        # FIX: Monkey-patch accelerate's load function to use weights_only=False for random_states
-        # Bug in accelerate 0.33.0: load_kwargs are not passed to the random_states loading (line 109)
-        # The random_states_0.pkl contains numpy arrays which require weights_only=False
-        from accelerate import checkpointing
-        from accelerate.utils import load as accelerate_load
+        # FIX: Manually set accelerator.step from checkpoint before loading
+        # This works around accelerate 0.33.0's weights_only issue with random_states_0.pkl
+        import torch
+        from pathlib import Path
 
-        original_load = accelerate_load
+        checkpoint_dir = Path(args.resume)
+        random_states_file = checkpoint_dir / "random_states_0.pkl"
 
-        def patched_load(f, map_location=None, **kwargs):
-            # Force weights_only=False for all pickle loads to allow numpy arrays
-            kwargs['weights_only'] = False
-            return original_load(f, map_location=map_location, **kwargs)
+        if random_states_file.exists():
+            try:
+                # Load with weights_only=False to allow numpy arrays
+                states = torch.load(random_states_file, map_location='cpu', weights_only=False)
+                if 'step' in states:
+                    # Pre-set the step so accelerate.load_state doesn't fail
+                    accelerator.step = states['step']
+                    logger.info(f"Pre-loaded step from checkpoint: {states['step']}")
+            except Exception as e:
+                logger.warning(f"Could not pre-load step from random_states: {e}")
 
-        # Temporarily replace the load function in the checkpointing module
-        checkpointing.load = patched_load
-
+        # Now load the checkpoint normally
+        # Even if this fails to load random_states due to weights_only, we already have the step
         try:
             accelerator.load_state(args.resume)
-        finally:
-            # Restore original function
-            checkpointing.load = original_load
+        except KeyError as e:
+            if 'step' in str(e):
+                # This is the expected error when random_states can't be loaded
+                # We already set accelerator.step above, so we can continue
+                logger.info(f"Skipped random_states loading (already set step={accelerator.step})")
+            else:
+                # Some other KeyError - re-raise
+                raise
+        except Exception as e:
+            # If it fails for another reason, log and re-raise
+            logger.error(f"load_state failed: {e}")
+            raise
 
+        logger.info(f"Successfully resumed from checkpoint at step {accelerator.step}")
         return
 
     logger.info(f"resume training from huggingface state: {args.resume}")

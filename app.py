@@ -1686,4 +1686,4 @@ with gr.Blocks(elem_id="app", theme=theme, css=css, fill_width=True) as demo:
     refresh.click(update, inputs=listeners, outputs=[train_script, train_config, dataset_folder])
 if __name__ == "__main__":
     cwd = os.path.dirname(os.path.abspath(__file__))
-    demo.launch(server_name="0.0.0.0", server_port=7860, share=True, debug=True, show_error=True, allowed_paths=[cwd])
+    demo.launch(server_name="0.0.0.0", server_port=7860, root_path="/proxy/7860", debug=True, show_error=True, allowed_paths=[cwd])

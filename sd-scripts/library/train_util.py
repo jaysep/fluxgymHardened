@@ -4685,10 +4685,25 @@ def resume_from_local_or_hf_if_specified(accelerator, args):
     if not args.resume_from_huggingface:
         logger.info(f"resume training from local state: {args.resume}")
 
-        # FIX: Pass weights_only=False to allow loading numpy arrays in random_states_0.pkl
-        # Accelerate 0.33.0 uses weights_only=True by default, which blocks numpy arrays
-        load_kwargs = {"weights_only": False}
-        accelerator.load_state(args.resume, load_kwargs=load_kwargs)
+        # FIX: Monkey-patch accelerate's load function to use weights_only=False for random_states
+        # Bug in accelerate 0.33.0: load_kwargs are not passed to the random_states loading (line 109)
+        # The random_states_0.pkl contains numpy arrays which require weights_only=False
+        import accelerate.checkpointing
+        original_load = accelerate.checkpointing.load
+
+        def patched_load(f, map_location=None, **kwargs):
+            # Force weights_only=False for all pickle loads to allow numpy arrays
+            kwargs['weights_only'] = False
+            return original_load(f, map_location=map_location, **kwargs)
+
+        # Temporarily replace the load function
+        accelerate.checkpointing.load = patched_load
+
+        try:
+            accelerator.load_state(args.resume)
+        finally:
+            # Restore original function
+            accelerate.checkpointing.load = original_load
 
         return
 

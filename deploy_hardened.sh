@@ -8,6 +8,7 @@ set -e  # Exit on error
 
 # Configuration
 GITHUB_RAW_URL="https://raw.githubusercontent.com/jaysep/fluxgymHardened/main"
+WORKSPACE_DIR="/workspace"
 FLUXGYM_DIR="/workspace/fluxgym"
 BACKUP_DIR="/workspace/fluxgym_backups/$(date +%Y%m%d_%H%M%S)"
 DRY_RUN=false
@@ -181,8 +182,10 @@ deploy_files() {
     backup_file "$FLUXGYM_DIR/training_monitor.py"
     backup_file "$FLUXGYM_DIR/find_checkpoint.py"
     backup_file "$FLUXGYM_DIR/sd-scripts/flux_train.py"
+    backup_file "$FLUXGYM_DIR/sd-scripts/train_network.py"
     backup_file "$FLUXGYM_DIR/sd-scripts/library/custom_offloading_utils.py"
     backup_file "$FLUXGYM_DIR/sd-scripts/library/strategy_base.py"
+    backup_file "$FLUXGYM_DIR/sd-scripts/library/train_util.py"
 
     print_header "Downloading Hardened Files from GitHub"
 
@@ -203,6 +206,11 @@ deploy_files() {
     download_file "sd-scripts/flux_train.py" "$FLUXGYM_DIR/sd-scripts/flux_train.py"
     download_file "sd-scripts/library/custom_offloading_utils.py" "$FLUXGYM_DIR/sd-scripts/library/custom_offloading_utils.py"
     download_file "sd-scripts/library/strategy_base.py" "$FLUXGYM_DIR/sd-scripts/library/strategy_base.py"
+
+    # Download training resumption files
+    print_info "Downloading training resumption files..."
+    download_file "sd-scripts/train_network.py" "$FLUXGYM_DIR/sd-scripts/train_network.py"
+    download_file "sd-scripts/library/train_util.py" "$FLUXGYM_DIR/sd-scripts/library/train_util.py"
 
     print_success "All files downloaded successfully"
 }
@@ -272,6 +280,30 @@ verify_files() {
         all_good=false
     fi
 
+    # check training resumption files
+    if [ -f "$FLUXGYM_DIR/sd-scripts/train_network.py" ]; then
+        if grep -q "save_and_remove_state_on_epoch_end(args, accelerator, epoch + 1, global_step)" "$FLUXGYM_DIR/sd-scripts/train_network.py"; then
+            print_success "train_network.py has training fix"
+        else
+            print_error "train_network.py missing training fix"
+            all_good=false
+        fi
+    else
+        print_error "train_network.py not found"
+        all_good=false
+    fi
+
+    if [ -f "$FLUXGYM_DIR/sd-scripts/library/train_util.py" ]; then
+        if grep -q "# FIX: Manually set accelerator.step from checkpoint before loading" "$FLUXGYM_DIR/sd-scripts/library/train_util.py"; then
+            print_success "train_util.py has training fix"
+        else
+            print_warning "train_util.py may not have training fix"
+        fi
+    else
+        print_error "train_util.py not found"
+        all_good=false
+    fi
+
     if [ "$all_good" = false ]; then
         print_error "Verification failed - some files are missing or incorrect"
         exit 1
@@ -293,16 +325,16 @@ start_app() {
 
     if [ ! -f "run_fluxgym.sh" ]; then
         print_error "run_fluxgym.sh not found"
-        print_info "Starting manually..."
+        print_info "Please start manually..."
 
         # Fallback: start manually
-        source env/bin/activate
-        export PYTHONWARNINGS="ignore"
-        nohup python3 app.py > fluxgym.log 2>&1 &
-        echo $! > fluxgym.pid
+        #source env/bin/activate
+        #export PYTHONWARNINGS="ignore"
+        #nohup python3 app.py > fluxgym.log 2>&1 &
+        #echo $! > fluxgym.pid
     else
         # Use their startup script
-        bash run_fluxgym.sh &
+        bash nohup run_fluxgym.sh &
     fi
 
     print_success "FluxGym started"
@@ -424,6 +456,8 @@ cp -v "$BACKUP_DIR/find_checkpoint.py" "$FLUXGYM_DIR/find_checkpoint.py" 2>/dev/
 cp -v "$BACKUP_DIR/sd-scripts/flux_train.py" "$FLUXGYM_DIR/sd-scripts/flux_train.py" 2>/dev/null || echo "Skipped: flux_train.py"
 cp -v "$BACKUP_DIR/sd-scripts/library/custom_offloading_utils.py" "$FLUXGYM_DIR/sd-scripts/library/custom_offloading_utils.py" 2>/dev/null || echo "Skipped: custom_offloading_utils.py"
 cp -v "$BACKUP_DIR/sd-scripts/library/strategy_base.py" "$FLUXGYM_DIR/sd-scripts/library/strategy_base.py" 2>/dev/null || echo "Skipped: strategy_base.py"
+cp -v "$BACKUP_DIR/sd-scripts/train_network.py" "$FLUXGYM_DIR/sd-scripts/train_network.py" 2>/dev/null || echo "Skipped: train_network.py"
+cp -v "$BACKUP_DIR/sd-scripts/library/train_util.py" "$FLUXGYM_DIR/sd-scripts/library/train_util.py" 2>/dev/null || echo "Skipped: train_util.py"
 
 echo "Restarting FluxGym..."
 cd "$FLUXGYM_DIR"

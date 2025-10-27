@@ -321,7 +321,7 @@ start_app() {
         return
     fi
 
-    cd "$FLUXGYM_DIR"
+    cd "$WORKSPACE_DIR"
 
     if [ ! -f "run_fluxgym.sh" ]; then
         print_error "run_fluxgym.sh not found"
@@ -334,7 +334,7 @@ start_app() {
         #echo $! > fluxgym.pid
     else
         # Use their startup script
-        bash nohup run_fluxgym.sh &
+        bash run_fluxgym.sh &
     fi
 
     print_success "FluxGym started"

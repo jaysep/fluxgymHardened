@@ -199,7 +199,7 @@ deploy_files() {
 
     # Make scripts executable
     if [ "$DRY_RUN" = false ]; then
-	chmod +x "$WORKSPACE_DIR/run_fluxgym.sh" 2 >/dev/null || true
+	chmod +x "$WORKSPACE_DIR/run_fluxgym.sh" 2>/dev/null || true
         chmod +x "$FLUXGYM_DIR/training_monitor.py" 2>/dev/null || true
         chmod +x "$FLUXGYM_DIR/find_checkpoint.py" 2>/dev/null || true
     fi
@@ -250,7 +250,7 @@ verify_files() {
     fi
 
     if [ -f "$FLUXGYM_DIR/training_monitor.py" ]; then
-        if grep -q "GPU usage monitoring" "$FLUXGYM_DIR/training_monitor.py"; then
+        if grep -q "Monitor GPU usage" "$FLUXGYM_DIR/training_monitor.py"; then
             print_success "training_monitor.py looks correct"
         else
             print_warning "training_monitor.py may not be correct version"
@@ -337,7 +337,7 @@ start_app() {
     fi
 
     cd "$WORKSPACE_DIR"
-
+    
     local autostart = true
     if [ ! -f "run_fluxgym.sh" ]; then
         print_error "run_fluxgym.sh not found"

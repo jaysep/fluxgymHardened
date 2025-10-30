@@ -178,6 +178,7 @@ deploy_files() {
     print_header "Backing Up Original Files"
 
     # Backup all files that will be replaced
+    backup_file "$WORKSPACE_DIR/run_fluxgym.sh"
     backup_file "$FLUXGYM_DIR/app.py"
     backup_file "$FLUXGYM_DIR/training_monitor.py"
     backup_file "$FLUXGYM_DIR/find_checkpoint.py"
@@ -191,12 +192,14 @@ deploy_files() {
 
     # Download core application files
     print_info "Downloading core application files..."
+    download_file "run_fluxgym.sh" "$WORKSPACE_DIR/run_fluxgym.sh"
     download_file "app.py" "$FLUXGYM_DIR/app.py"
     download_file "training_monitor.py" "$FLUXGYM_DIR/training_monitor.py"
     download_file "find_checkpoint.py" "$FLUXGYM_DIR/find_checkpoint.py"
 
     # Make scripts executable
     if [ "$DRY_RUN" = false ]; then
+	chmod +x "$WORKSPACE_DIR/run_fluxgym.sh" 2 >/dev/null || true
         chmod +x "$FLUXGYM_DIR/training_monitor.py" 2>/dev/null || true
         chmod +x "$FLUXGYM_DIR/find_checkpoint.py" 2>/dev/null || true
     fi
@@ -222,6 +225,18 @@ verify_files() {
     local all_good=true
 
     # Check core files
+    if [ -f "$WORKSPACE_DIR/app.py" ]; then
+        if grep -q "nohup" "$WORKSPACE_DIR/run_fluxgym.sh"; then
+            print_success "run_fluxgym.sh has hardened features"
+        else
+            print_error "run_fluxgym.sh missing hardened features"
+            all_good=false
+        fi
+    else
+        print_error "run_fluxgym not found"
+        all_good=false
+    fi
+
     if [ -f "$FLUXGYM_DIR/app.py" ]; then
         if grep -q "enable_monitoring" "$FLUXGYM_DIR/app.py"; then
             print_success "app.py has hardened features"
@@ -323,10 +338,11 @@ start_app() {
 
     cd "$WORKSPACE_DIR"
 
+    local autostart = true
     if [ ! -f "run_fluxgym.sh" ]; then
         print_error "run_fluxgym.sh not found"
         print_info "Please start manually..."
-
+	autostart = false
         # Fallback: start manually
         #source env/bin/activate
         #export PYTHONWARNINGS="ignore"
@@ -337,9 +353,11 @@ start_app() {
         bash run_fluxgym.sh &
     fi
 
-    print_success "FluxGym started"
-    print_info "Waiting 5 seconds for startup..."
-    sleep 5
+    if [ "$autostart" = true ]; then
+    	print_success "FluxGym started"
+    	print_info "Waiting 5 seconds for startup..."
+    	sleep 5
+    fi
 }
 
 # Check if app started successfully

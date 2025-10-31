@@ -927,6 +927,7 @@ class NetworkTrainer:
                 json.dump({"current_epoch": current_epoch.value, "current_step": current_step.value + 1}, f)
 
         steps_from_state = None
+        epoch_from_state = None
 
         def load_model_hook(models, input_dir):
             # remove models except network
@@ -939,13 +940,19 @@ class NetworkTrainer:
             # print(f"load model hook: {len(models)} models will be loaded")
 
             # load current epoch and step to
-            nonlocal steps_from_state
+            nonlocal steps_from_state, epoch_from_state
             train_state_file = os.path.join(input_dir, "train_state.json")
             if os.path.exists(train_state_file):
                 with open(train_state_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 steps_from_state = data["current_step"]
+                epoch_from_state = data.get("current_epoch", None)
                 logger.info(f"load train state from {train_state_file}: {data}")
+
+                # FIX: Set current_epoch.value immediately after loading
+                if epoch_from_state is not None:
+                    current_epoch.value = epoch_from_state
+                    logger.info(f"Restored current_epoch to {epoch_from_state} from checkpoint")
 
         accelerator.register_save_state_pre_hook(save_model_hook)
         accelerator.register_load_state_pre_hook(load_model_hook)

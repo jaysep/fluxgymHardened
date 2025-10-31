@@ -971,7 +971,9 @@ def start_training(
             "--output-dir", output_dir,
             "--check-interval", "30",
             "--stuck-threshold", "300",
-            "--gpu-threshold", "5.0"
+            "--gpu-threshold", "5.0",
+            "--auto-resume",
+            "--train-script", sh_filepath
         ]
 
         # Start monitor in background with nohup
@@ -999,7 +1001,7 @@ def start_training(
             with open(monitor_pid_file, 'w') as f:
                 f.write(str(monitor_pid))
 
-            gr.Info(f"Started monitoring (PID: {monitor_pid}, Log: outputs/{output_name}/monitor.log)")
+            gr.Info(f"Started auto-monitoring with auto-resume (PID: {monitor_pid}, Log: outputs/{output_name}/monitor.log)")
         except Exception as e:
             gr.Warning(f"Failed to start monitoring: {e}")
 
@@ -1423,7 +1425,7 @@ with gr.Blocks(elem_id="app", theme=theme, css=css, fill_width=True) as demo:
                     resolution = gr.Number(value=512, precision=0, label="Resize dataset images")
                     enable_checkpointing = gr.Checkbox(value=True, label="Enable Checkpointing (Save training state for resume)", interactive=True)
                     resume_from_checkpoint = gr.Textbox("", label="Resume from Checkpoint (path to state folder, e.g., outputs/my-lora/my-lora-state)", interactive=True)
-                    enable_monitoring = gr.Checkbox(value=True, label="Enable Auto-Monitoring (Detect stuck training automatically)", interactive=True, info="Runs monitoring in background to detect if GPU usage drops to 0%")
+                    enable_monitoring = gr.Checkbox(value=True, label="Enable Auto-Monitoring with Auto-Resume", interactive=True, info="Monitors GPU usage and automatically resumes from last checkpoint if training gets stuck (GPU=0% for 5min)")
                 with gr.Column():
                     gr.Markdown(
                         """# Step 2. Dataset

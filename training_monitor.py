@@ -190,7 +190,9 @@ class CheckpointManager:
                 logger.warning(f"Checkpoint {checkpoint_path.name} has empty file: {required_file}")
                 return False
 
-        # Check for metadata - can be either custom_checkpoint_0.pkl OR train_state.json
+        # Check for metadata - can be either format:
+        # 1. Modern format: custom_checkpoint_0.pkl (newer accelerate versions)
+        # 2. Old format: train_state.json (FluxGym custom format - still works)
         has_custom_checkpoint = (checkpoint_path / 'custom_checkpoint_0.pkl').exists()
         has_train_state = (checkpoint_path / 'train_state.json').exists()
 
@@ -198,7 +200,7 @@ class CheckpointManager:
             logger.warning(f"Checkpoint {checkpoint_path.name} missing both custom_checkpoint_0.pkl and train_state.json")
             return False
 
-        # Validate custom_checkpoint_0.pkl if it exists (newer format)
+        # Validate modern format (custom_checkpoint_0.pkl) if it exists
         if has_custom_checkpoint:
             try:
                 import pickle
@@ -214,16 +216,16 @@ class CheckpointManager:
                 # Log checkpoint info
                 step = data.get('step', '?')
                 epoch = data.get('epoch', '?')
-                logger.info(f"Validated checkpoint {checkpoint_path.name} (new format): step={step}, epoch={epoch}")
+                logger.info(f"Validated checkpoint {checkpoint_path.name} (modern format): step={step}, epoch={epoch}")
                 return True
 
             except Exception as e:
-                logger.warning(f"Failed to validate checkpoint {checkpoint_path.name} metadata: {e}")
+                logger.warning(f"Failed to validate modern checkpoint {checkpoint_path.name}: {e}")
                 # Fall through to check train_state.json if available
                 if not has_train_state:
                     return False
 
-        # Validate train_state.json if custom_checkpoint doesn't exist or failed
+        # Validate old format (train_state.json) - this is FluxGym's custom format
         if has_train_state:
             try:
                 import json
@@ -239,18 +241,11 @@ class CheckpointManager:
 
                 step = data.get('current_step', '?')
                 epoch = data.get('current_epoch', '?')
-
-                # IMPORTANT: This older format may NOT work with newer accelerate versions
-                logger.warning(f"Checkpoint {checkpoint_path.name} uses old format (train_state.json)")
-                logger.warning(f"This may fail with: KeyError: 'step' when resuming")
-                logger.warning(f"Step={step}, Epoch={epoch}")
-                logger.warning(f"Consider this checkpoint INVALID for auto-resume")
-
-                # Return False because this will likely fail with KeyError: 'step'
-                return False
+                logger.info(f"Validated checkpoint {checkpoint_path.name} (FluxGym format): step={step}, epoch={epoch}")
+                return True
 
             except Exception as e:
-                logger.warning(f"Failed to validate checkpoint {checkpoint_path.name} train_state: {e}")
+                logger.warning(f"Failed to validate FluxGym checkpoint {checkpoint_path.name}: {e}")
                 return False
 
         return False
@@ -405,7 +400,7 @@ class TrainingMonitor:
                 logger.info(f"  --resume {latest_checkpoint}")
 
     def resume_training(self, checkpoint_path: Path):
-        """Resume training from checkpoint"""
+        """Resume training from checkpoint by creating a separate resume.sh script"""
         if not self.train_script:
             logger.error("Cannot resume: No training script provided")
             logger.info(f"Please manually run with: --resume {checkpoint_path}")
@@ -416,7 +411,7 @@ class TrainingMonitor:
             logger.error(f"Training script not found: {train_script_path}")
             return
 
-        # Read the training script
+        # Read the original training script
         try:
             with open(train_script_path, 'r') as f:
                 script_content = f.read()
@@ -424,7 +419,7 @@ class TrainingMonitor:
             logger.error(f"Failed to read training script: {e}")
             return
 
-        # Modify script to add --resume flag
+        # Create resume script with --resume flag
         if train_script_path.suffix == '.sh':
             # Find the accelerate launch command and add --resume before the last line
             # The last line is typically "--loss_type l2" or similar
@@ -451,18 +446,22 @@ class TrainingMonitor:
 
             modified_script = '\n'.join(modified_lines)
 
-            # Save modified script
+            # Create separate resume.sh script (don't modify train.sh)
+            resume_script_path = train_script_path.parent / 'resume.sh'
             try:
-                with open(train_script_path, 'w') as f:
+                with open(resume_script_path, 'w') as f:
                     f.write(modified_script)
-                logger.info(f"Modified training script with --resume {checkpoint_path}")
+                # Make executable
+                os.chmod(resume_script_path, 0o755)
+                logger.info(f"Created resume script: {resume_script_path}")
+                logger.info(f"Resume script contains: --resume {checkpoint_path}")
             except Exception as e:
-                logger.error(f"Failed to write modified script: {e}")
+                logger.error(f"Failed to write resume script: {e}")
                 return
 
-            # Execute the script in background
+            # Execute the resume script in background
             logger.info(f"Starting training from checkpoint: {checkpoint_path}")
-            self._execute_training_script(train_script_path)
+            self._execute_training_script(resume_script_path)
 
         elif train_script_path.suffix == '.bat':
             logger.warning("Auto-resume with .bat scripts is not yet supported")
@@ -487,7 +486,7 @@ class TrainingMonitor:
         self._execute_training_script(train_script_path)
 
     def _execute_training_script(self, script_path: Path):
-        """Execute training script in background"""
+        """Execute training script in background with nohup for terminal persistence"""
         try:
             # Get the directory of the script for proper working directory
             script_dir = script_path.parent
@@ -496,19 +495,33 @@ class TrainingMonitor:
             # Redirect output to a log file
             log_file = script_dir / 'training_resume.log'
 
-            logger.info(f"Executing: bash {script_path}")
+            logger.info(f"Executing: nohup bash {script_path}")
             logger.info(f"Output will be logged to: {log_file}")
 
+            # Use nohup to ensure the process survives terminal disconnection
+            # This is critical for cloud environments (Runpod, Vast.ai, etc.)
             with open(log_file, 'w') as f:
-                process = subprocess.Popen(
-                    ['bash', str(script_path)],
-                    cwd=str(script_dir),
-                    stdout=f,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True  # Detach from parent process
-                )
+                if sys.platform == "win32":
+                    # Windows: no nohup, use CREATE_NEW_PROCESS_GROUP
+                    process = subprocess.Popen(
+                        ['bash', str(script_path)],
+                        cwd=str(script_dir),
+                        stdout=f,
+                        stderr=subprocess.STDOUT,
+                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                    )
+                else:
+                    # Linux/Mac: use nohup for terminal persistence
+                    process = subprocess.Popen(
+                        ['nohup', 'bash', str(script_path)],
+                        cwd=str(script_dir),
+                        stdout=f,
+                        stderr=subprocess.STDOUT,
+                        start_new_session=True  # Detach from parent process
+                    )
 
             logger.info(f"Training restarted with PID: {process.pid}")
+            logger.info("Process will persist even if terminal disconnects (nohup)")
             logger.info("Monitor will continue tracking the resumed training...")
 
         except Exception as e:

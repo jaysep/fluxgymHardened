@@ -26,7 +26,7 @@ from argparse import Namespace
 import train_network
 import toml
 import re
-MAX_IMAGES = 10000
+MAX_IMAGES = 999
 
 with open('models.yaml', 'r') as file:
     models = yaml.safe_load(file)
@@ -525,7 +525,7 @@ def gen_sh(
 
     if len(advanced_flags) > 0:
         advanced_flags_str = f" {line_break}\n  ".join(advanced_flags)
-        sh = sh + "\n  " + advanced_flags_str
+        sh = sh + f" {line_break}\n  " + advanced_flags_str
 
     return sh
 
@@ -917,6 +917,7 @@ def start_training(
     sh_filename = f"train.{file_type}"
     sh_filepath = resolve_path_without_quotes(f"outputs/{output_name}/{sh_filename}")
     with open(sh_filepath, 'w', encoding="utf-8") as file:
+        file.write("#!/bin/bash\nsource /workspace/fluxgym/env/bin/activate\ncd /workspace/fluxgym/\n")
         file.write(train_script)
     gr.Info(f"Generated train script at {sh_filename}")
 
